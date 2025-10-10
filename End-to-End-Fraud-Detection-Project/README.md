@@ -42,7 +42,7 @@ CC-Fraud/
 
 ### 1. Clone the repository
 ```bash
-git clone https://github.com/codehax41/CC-Fraud.git
+git clone http://github.com/longmen2019/MLOps-DevOps-III/blob/main/End-to-End-Fraud-Detection-Project/
 cd CC-Fraud
 ```
 
