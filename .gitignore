@@ -116,3 +116,12 @@ report.*.json
 *.bak
 .DS_Store
 Thumbs.db
+# Python virtual environments
+pytorch/
+Deploy-ML-Models-as-APIs-with-Flask-in-Python/deployml/
+# Python virtual environments
+venv/
+env/
+*/venv/
+*/env/
+*/deployml/
