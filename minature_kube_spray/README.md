@@ -1,124 +1,262 @@
-You wrapped up at the perfect stopping point, Long. Let me give you a **clear, structured, pick‑up‑tomorrow guide** so you can jump right back in without losing momentum. I’ll keep it practical, ordered, and aligned with exactly where you left off.
+
+# **Kubernetes Networking Deep‑Dive & Recovery Lab (Kubespray + Calico + Azure)**
+
+This project documents a full lifecycle Kubernetes networking investigation, built on Azure using **Kubespray**, **Calico**, and **IPVS‑based kube‑proxy**.  
+It covers cluster provisioning, overlay networking validation, service routing diagnostics, packet‑level analysis, and workload verification — all executed with production‑grade rigor.
 
 ---
 
-# 🌅 **Your “Continue Tomorrow” Guide**
-Everything below is tailored to the exact state of your cluster right now.
+## **📌 Table of Contents**
+- [Overview](#overview)  
+- [Architecture](#architecture)  
+- [Objectives](#objectives)  
+- [Cluster Deployment](#cluster-deployment)  
+- [Networking Validation](#networking-validation)  
+- [Service Routing & kube-proxy Analysis](#service-routing--kube-proxy-analysis)  
+- [Calico Diagnostics](#calico-diagnostics)  
+- [Workload Deployment](#workload-deployment)  
+- [Issue Resolution Summary](#issue-resolution-summary)  
+- [Key Learnings](#key-learnings)  
+- [Technologies Used](#technologies-used)
 
 ---
 
-## 🧩 **1. Where your cluster stands right now**
-- Terraform deployment is **successful**
-- Control-plane is up with:
-  - Public IP: `20.101.52.116`
-  - Private IP: `10.10.1.4`
-- Workers are up:
-  - worker1 → `10.10.1.5`
-  - worker2 → `10.10.1.6`
-- Workers currently **reject SSH keys** (expected, fix pending)
-- Jump host removed (good)
-- Inventory file generated and correct
+# **Overview**
 
-You’re right at the point where you need to fix SSH access to workers, then run Kubespray.
+This project demonstrates a complete, architect‑level walkthrough of Kubernetes networking — from cluster provisioning to VXLAN packet capture, IPVS service routing, and workload validation.
+
+The environment was deployed using **Kubespray** on Azure, with Calico providing the CNI and kube‑proxy operating in **IPVS mode**.  
+The focus of the lab was to diagnose and resolve a real‑world networking issue where pods on a worker node were unable to reach the Kubernetes API service (`10.233.0.1:443`).
 
 ---
 
-## 🔧 **2. First task tomorrow: Fix SSH access to workers**
-From your laptop:
+# **Architecture**
+
+### **Cluster Topology**
+- **1× Control Plane Node**  
+  - Internal IP: `10.10.1.6`  
+  - Public IP: Azure‑assigned  
+- **2× Worker Nodes**  
+  - Worker1: `10.10.1.5`  
+  - Worker2: `10.10.1.7`
+
+### **Networking Components**
+- **Calico VXLAN overlay** (`UDP 4789`)
+- **Pod CIDRs**: `10.233.0.0/16`  
+- **Service CIDRs**: `10.233.0.0/18`  
+- **kube-proxy**: IPVS mode  
+- **Azure VNet**: Flat L3 network, no NSG restrictions on internal traffic
+
+---
+
+# **Objectives**
+
+### **Primary Goals**
+- Deploy a reproducible Kubernetes cluster using Kubespray  
+- Validate Calico VXLAN overlay networking  
+- Diagnose service VIP routing failures  
+- Restore full cluster networking health  
+- Deploy and expose workloads for functional verification  
+
+### **Secondary Goals**
+- Strengthen packet‑level observability  
+- Validate kube‑proxy behavior in IPVS mode  
+- Understand Calico routing, blackhole routes, and VTEP mappings  
+- Build a reusable troubleshooting workflow for future clusters  
+
+---
+
+# **Cluster Deployment**
+
+The cluster was deployed using **Kubespray**, leveraging:
+
+- Ansible‑driven provisioning  
+- Automated control plane bootstrapping  
+- Automated worker node join  
+- Calico CNI installation  
+- kube‑proxy configured in IPVS mode  
+- Deterministic, idempotent cluster creation
+
+After deployment:
 
 ```bash
-terraform destroy \
-  -target=azurerm_linux_virtual_machine.worker1 \
-  -target=azurerm_linux_virtual_machine.worker2
+kubectl get nodes -o wide
 ```
 
-Then recreate them with your correct SSH key:
+confirmed all nodes were registered and Ready.
+
+---
+
+# **Networking Validation**
+
+### **1. VXLAN Encapsulation Verification**
+
+Using `tcpdump` on worker1:
 
 ```bash
-terraform apply -var="ssh_public_key=$(cat ~/.ssh/id_rsa.pub)"
+sudo tcpdump -ni any udp port 4789
 ```
 
-This ensures both workers have the same SSH key as the control-plane.
+Captured bidirectional VXLAN traffic:
+
+```
+10.10.1.5.xxx > 10.10.1.6.4789: VXLAN vni 4096
+10.10.1.6.xxx > 10.10.1.5.4789: VXLAN vni 4096
+```
+
+This confirmed:
+- VXLAN tunnels were established  
+- Encapsulation/decapsulation was functioning  
+- Azure VNet was not blocking overlay traffic  
 
 ---
 
-## 🧪 **3. Verify SSH from control-plane**
-SSH into the control-plane:
+### **2. Pod Routing Validation**
+
+`ip route` on worker1 showed:
+
+```
+10.233.120.0/26 via 10.233.120.0 dev vxlan.calico onlink
+10.233.125.0/26 via 10.233.125.0 dev vxlan.calico onlink
+blackhole 10.233.105.128/26 proto 80
+```
+
+This validated:
+- Calico programmed pod CIDR routes correctly  
+- Blackhole routes were expected for host‑local pod blocks  
+- No routing inconsistencies existed  
+
+---
+
+# **Service Routing & kube-proxy Analysis**
+
+### **1. kube-proxy Mode Verification**
+
+Logs confirmed IPVS mode:
+
+```
+Using ipvs Proxier
+```
+
+### **2. IPVS Table Inspection**
 
 ```bash
-ssh azureuser@20.101.52.116
+sudo ipvsadm -Ln
 ```
 
-Then test workers:
+Showed:
+
+```
+TCP 10.233.0.1:443 rr
+  -> 10.10.1.6:6443 Masq
+```
+
+This validated:
+- The Kubernetes API service VIP was programmed  
+- kube-proxy was healthy  
+- Endpoint load balancing was active  
+
+---
+
+# **Calico Diagnostics**
+
+### **Problem Observed**
+`calico-kube-controllers` was failing with:
+
+```
+dial tcp 10.233.0.1:443: i/o timeout
+```
+
+This indicated:
+- Pods on worker1 could not reach the API service VIP  
+- kube-proxy had not yet programmed service rules at the time  
+
+### **Resolution**
+Once kube-proxy finished syncing and IPVS entries appeared, restarting the Calico controllers resolved the issue:
 
 ```bash
-ssh azureuser@10.10.1.5
-ssh azureuser@10.10.1.6
+kubectl delete pod -n kube-system -l k8s-app=calico-kube-controllers
 ```
 
-If both succeed, you’re ready for Kubespray.
+After restart:
+- Calico controllers became Ready  
+- CoreDNS on worker2 recovered  
+- Cluster networking became fully healthy  
 
 ---
 
-## 🚀 **4. Run Kubespray**
-Inside your Kubespray directory:
+# **Workload Deployment**
+
+### **1. Deploy nginx**
 
 ```bash
-ansible-playbook -i inventory.ini cluster.yml -b --become-user=root
+kubectl run nginx --image=nginx
 ```
 
-This will:
-- Install container runtime
-- Bootstrap Kubernetes
-- Join workers
-- Deploy CNI
-- Produce a working cluster
+### **2. Create a Service**
 
----
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx
+spec:
+  selector:
+    app: nginx
+  ports:
+  - port: 80
+    targetPort: 80
+```
 
-## 🧭 **5. After Kubespray finishes**
-On the control-plane:
+### **3. Port‑Forward for Local Access**
 
 ```bash
-mkdir -p ~/.kube
-sudo cp /etc/kubernetes/admin.conf ~/.kube/config
-sudo chown $USER:$USER ~/.kube/config
-kubectl get nodes
+sudo kubectl port-forward svc/nginx 8080:80
 ```
 
-You should see:
+Accessed via:
 
 ```
-control-plane   Ready
-worker1         Ready
-worker2         Ready
+http://127.0.0.1:8080
 ```
 
 ---
 
-## 📌 **6. Optional tasks for later**
-Not required tomorrow, but good to keep in mind:
+# **Issue Resolution Summary**
 
-- Install metrics-server
-- Install dashboard
-- Deploy a sample workload
-- Add autoscaling
-- Add ingress-nginx
+### **Root Cause**
+Service VIP (`10.233.0.1`) was unreachable from worker1 pods because kube-proxy had not yet programmed IPVS rules.
 
-We can do these step-by-step when you’re ready.
+### **Fix**
+- Verified kube-proxy health  
+- Confirmed IPVS service entries  
+- Restarted Calico controllers after VIP became reachable  
 
----
-
-# 🗂️ **Your quick “resume work” checklist for tomorrow**
-
-### ✔ Destroy workers  
-### ✔ Recreate workers with correct SSH key  
-### ✔ SSH into control-plane  
-### ✔ SSH into workers  
-### ✔ Run Kubespray  
-### ✔ Verify cluster with `kubectl get nodes`
-
-That’s it — you’ll be fully operational.
+### **Outcome**
+- Full cluster networking restored  
+- DNS, Calico, and workloads became healthy  
+- End‑to‑end connectivity validated  
 
 ---
 
+# **Key Learnings**
+
+- VXLAN packet capture is invaluable for validating overlay networks  
+- kube-proxy in IPVS mode provides clear visibility into service routing  
+- Calico routing tables and blackhole routes are essential for pod isolation  
+- Service VIP propagation delays can cascade into CNI failures  
+- A structured, packet‑level troubleshooting workflow accelerates root cause analysis  
+
+---
+
+# **Technologies Used**
+
+- **Kubernetes (v1.28)**  
+- **Kubespray**  
+- **Calico CNI (VXLAN mode)**  
+- **kube-proxy (IPVS)**  
+- **Azure Virtual Machines & VNet**  
+- **containerd**  
+- **tcpdump, ipvsadm, iptables**  
+
+---
