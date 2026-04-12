@@ -181,14 +181,11 @@ k8s-cluster-automation/
 │   │       └── workers.yml          # Worker-specific vars
 │   │
 │   ├── playbooks/
-│   │   ├── 00-site.yml              # Master playbook — runs all in order
-│   │   ├── 01-prerequisites.yml     # OS prep, swap off, kernel modules
-│   │   ├── 02-containerd.yml        # Container runtime installation
-│   │   ├── 03-kube-components.yml   # kubeadm, kubelet, kubectl
-│   │   ├── 04-init-control-plane.yml# kubeadm init + CNI (Calico/Flannel)
-│   │   ├── 05-join-workers.yml      # kubeadm join with token
-│   │   ├── 06-post-install.yml      # Smoke tests, labels, taints
-│   │   └── 99-teardown.yml          # Graceful drain, reset, cleanup
+│   │   ├── prereqs.yml              # OS prep, swap off, kernel modules
+│   │   ├── install-k8s.yml          # kubeadm, kubelet, kubectl, containerd
+│   │   ├── master-init.yml          # kubeadm init, kubeconfig setup
+│   │   ├── calico.yml               # Calico CNI plugin deployment
+│   │   └── workers-join.yml         # kubeadm join for worker nodes
 │   │
 │   ├── roles/
 │   │   ├── common/                  # Shared OS hardening, package updates
@@ -311,16 +308,12 @@ cd ansible
 ansible-inventory --list -i inventory/hosts.ini
 ansible all -m ping
 
-# Full cluster deployment (end-to-end)
-ansible-playbook playbooks/00-site.yml
-
-# Or run individual stages
-ansible-playbook playbooks/01-prerequisites.yml
-ansible-playbook playbooks/02-containerd.yml
-ansible-playbook playbooks/03-kube-components.yml
-ansible-playbook playbooks/04-init-control-plane.yml
-ansible-playbook playbooks/05-join-workers.yml
-ansible-playbook playbooks/06-post-install.yml
+# Run playbooks in sequence for full cluster deployment
+ansible-playbook playbooks/prereqs.yml
+ansible-playbook playbooks/install-k8s.yml
+ansible-playbook playbooks/master-init.yml
+ansible-playbook playbooks/calico.yml
+ansible-playbook playbooks/workers-join.yml
 ```
 
 ### 5. Validate the Cluster
@@ -475,12 +468,11 @@ Operator Workstation (Ansible Controller)
          │  SSH ProxyJump via Bastion
          │
          ▼
-    ┌─────────┐    01-prerequisites ──► All nodes
-    │ Ansible  │    02-containerd   ──► All nodes
-    │ Engine   │    03-kube-comp.   ──► All nodes
-    │         │    04-init-cp      ──► Control plane only
-    │         │    05-join-wk      ──► Workers only
-    │         │    06-post-inst.   ──► Control plane (validation)
+    ┌─────────┐    prereqs       ──► All nodes
+    │ Ansible  │    install-k8s   ──► All nodes
+    │ Engine   │    master-init   ──► Control plane only
+    │         │    calico        ──► Control plane only
+    │         │    workers-join  ──► Workers only
     └─────────┘
 ```
 
@@ -526,7 +518,7 @@ ansible_ssh_common_args=-o ProxyJump=azureuser@<BASTION_PUBLIC_IP>
 
 ## Playbook Reference
 
-### `01-prerequisites.yml` — OS Preparation
+### `prereqs.yml` — OS Preparation
 
 Targets all cluster nodes. Ensures the OS is ready for Kubernetes.
 
@@ -540,45 +532,45 @@ Targets all cluster nodes. Ensures the OS is ready for Kubernetes.
 - Configure NTP synchronization
 ```
 
-### `02-containerd.yml` — Container Runtime
+### `install-k8s.yml` — Kubernetes & Container Runtime Installation
 
-Installs and configures `containerd` as the CRI-compliant container runtime.
-
-```yaml
-# Key tasks:
-- Install containerd from official Docker repository
-- Generate default config: containerd config default
-- Set SystemdCgroup = true (required for K8s ≥ 1.22)
-- Enable and start containerd service
-- Validate: ctr version
-```
-
-### `03-kube-components.yml` — Kubernetes Binaries
-
-Installs `kubeadm`, `kubelet`, and `kubectl` at pinned versions.
+Installs the Kubernetes toolchain and the containerd container runtime across all nodes.
 
 ```yaml
 # Key tasks:
 - Add Kubernetes apt repository and GPG key
 - Install kubeadm, kubelet, kubectl (version-pinned)
 - Hold packages to prevent unplanned upgrades
-- Enable kubelet service
+- Install containerd from official Docker repository
+- Generate default config: containerd config default
+- Set SystemdCgroup = true (required for K8s ≥ 1.22)
+- Enable and start containerd and kubelet services
 ```
 
-### `04-init-control-plane.yml` — Cluster Initialization
+### `master-init.yml` — Control Plane Initialization
 
-Runs `kubeadm init` on the control plane node and deploys the CNI plugin.
+Runs `kubeadm init` on the control plane node and configures admin access.
 
 ```yaml
 # Key tasks:
 - kubeadm init with --pod-network-cidr and --apiserver-advertise-address
 - Copy admin kubeconfig to azureuser's ~/.kube/config
-- Deploy Calico (or Flannel) CNI manifest
 - Generate and register join command + token
-- Store join command as Ansible fact for worker playbook
+- Store join command as Ansible fact for workers-join playbook
 ```
 
-### `05-join-workers.yml` — Worker Node Join
+### `calico.yml` — CNI Plugin Deployment
+
+Deploys the Calico CNI plugin on the control plane to enable pod networking.
+
+```yaml
+# Key tasks:
+- Apply Calico manifest with configured pod CIDR
+- Verify Calico pods reach Running status in kube-system namespace
+- Validate cross-node pod networking readiness
+```
+
+### `workers-join.yml` — Worker Node Registration
 
 Joins each worker to the cluster using the token from the control plane.
 
@@ -586,32 +578,7 @@ Joins each worker to the cluster using the token from the control plane.
 # Key tasks:
 - Retrieve join command from hostvars[cp1]
 - Execute kubeadm join on each worker
-- Validate: kubectl get nodes shows worker as Ready
-```
-
-### `06-post-install.yml` — Validation & Labeling
-
-Runs post-deployment checks and applies node labels.
-
-```yaml
-# Key tasks:
-- Verify all nodes report Ready status
-- Label workers: node-role.kubernetes.io/worker=worker
-- Deploy a test nginx pod and service
-- Validate pod scheduling across workers
-- Print cluster summary
-```
-
-### `99-teardown.yml` — Graceful Cleanup
-
-Safely dismantles the cluster for rebuild.
-
-```yaml
-# Key tasks:
-- Drain and delete worker nodes
-- kubeadm reset on all nodes
-- Remove CNI configuration and iptables rules
-- Clean /etc/kubernetes and /var/lib/kubelet
+- Validate: kubectl get nodes shows workers as Ready
 ```
 
 ---
@@ -703,19 +670,23 @@ cd ansible
 ansible all -m ping
 
 # Run a single playbook
-ansible-playbook playbooks/03-kube-components.yml
+ansible-playbook playbooks/install-k8s.yml
 
 # Run with verbose output for debugging
-ansible-playbook playbooks/04-init-control-plane.yml -vvv
+ansible-playbook playbooks/master-init.yml -vvv
 
 # Run on a specific host group
-ansible-playbook playbooks/01-prerequisites.yml --limit workers
+ansible-playbook playbooks/prereqs.yml --limit workers
 
 # Dry run (check mode)
-ansible-playbook playbooks/01-prerequisites.yml --check --diff
+ansible-playbook playbooks/prereqs.yml --check --diff
 
-# Re-run the full site playbook (idempotent — safe to repeat)
-ansible-playbook playbooks/00-site.yml
+# Re-run the full sequence (idempotent — safe to repeat)
+ansible-playbook playbooks/prereqs.yml
+ansible-playbook playbooks/install-k8s.yml
+ansible-playbook playbooks/master-init.yml
+ansible-playbook playbooks/calico.yml
+ansible-playbook playbooks/workers-join.yml
 ```
 
 ---
@@ -995,7 +966,7 @@ ls -la ~/.ssh/id_rsa     # Key should be -rw------- (600)
 | **NSG least-privilege**              | Bastion: SSH from operator IP only; Cluster: internal + bastion only |
 | **No secrets on control plane**      | Join tokens are ephemeral; kubeconfig is user-scoped                 |
 | **Version pinning**                  | All K8s and containerd versions are pinned to prevent drift          |
-| **Swap disabled**                    | Required by kubelet; enforced in prerequisites playbook              |
+| **Swap disabled**                    | Required by kubelet; enforced in prereqs playbook              |
 | **Idempotent playbooks**            | Safe to re-run without side effects                                  |
 
 ### Recommendations for Production
@@ -1052,5 +1023,16 @@ Please ensure:
 ## License
 
 This project is licensed under the [MIT License](LICENSE).
+
+---
+
+<div align="center">
+
+**Built with operational rigor and security-first principles.**
+
+*Questions? Issues? Open a [GitHub Issue](../../issues) or reach out.*
+
+</div>
+```
 
 ---
