@@ -1025,14 +1025,3 @@ Please ensure:
 This project is licensed under the [MIT License](LICENSE).
 
 ---
-
-<div align="center">
-
-**Built with operational rigor and security-first principles.**
-
-*Questions? Issues? Open a [GitHub Issue](../../issues) or reach out.*
-
-</div>
-```
-
----
