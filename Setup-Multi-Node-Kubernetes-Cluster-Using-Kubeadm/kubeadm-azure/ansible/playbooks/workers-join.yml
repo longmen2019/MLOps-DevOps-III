@@ -1,0 +1,16 @@
+- hosts: kube_node
+  become: yes
+
+  vars:
+    master_host: "{{ groups['kube_control_plane'][0] }}"
+
+  pre_tasks:
+    - name: Get join command
+      command: cat /tmp/kubeadm_join.sh
+      register: join_cmd
+      delegate_to: "{{ master_host }}"
+      run_once: true
+
+  tasks:
+    - name: Join worker to cluster
+      command: "{{ join_cmd.stdout }} --v=5"

@@ -1,0 +1,78 @@
+- hosts: all
+  become: yes
+  tasks:
+
+    - name: Remove old Kubernetes repo files
+      file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - /etc/apt/sources.list.d/kubernetes.list
+        - /etc/apt/sources.list.d/kubernetes.repo
+        - /etc/apt/sources.list.d/kubernetes-stable.list
+
+    - name: Install required packages (no cache update yet)
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+        state: present
+        update_cache: no
+
+    - name: Create keyrings directory
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+
+    - name: Download Kubernetes apt key
+      ansible.builtin.get_url:
+        url: https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key
+        dest: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        mode: '0644'
+
+    - name: Add Kubernetes apt repository
+      ansible.builtin.copy:
+        dest: /etc/apt/sources.list.d/kubernetes.list
+        content: |
+          deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /
+        mode: '0644'
+
+    - name: Update apt cache (with correct repo)
+      apt:
+        update_cache: yes
+
+    - name: Install containerd
+      apt:
+        name: containerd
+        state: present
+
+    - name: Configure containerd
+      command: containerd config default > /etc/containerd/config.toml
+      args:
+        creates: /etc/containerd/config.toml
+
+    - name: Restart containerd
+      service:
+        name: containerd
+        state: restarted
+        enabled: yes
+
+    - name: Install Kubernetes components
+      apt:
+        name:
+          - kubelet
+          - kubeadm
+          - kubectl
+        state: present
+        update_cache: yes
+
+    - name: Hold Kubernetes packages
+      apt:
+        name:
+          - kubelet
+          - kubeadm
+          - kubectl
+        state: hold

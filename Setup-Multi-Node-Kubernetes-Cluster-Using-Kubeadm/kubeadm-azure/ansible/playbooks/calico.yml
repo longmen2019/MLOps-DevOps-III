@@ -1,0 +1,10 @@
+- hosts: kube_control_plane
+  become: yes
+  tasks:
+
+    - name: Install Calico CNI
+      command: >
+        kubectl apply
+        --kubeconfig /etc/kubernetes/admin.conf
+        --validate=false
+        -f https://raw.githubusercontent.com/projectcalico/calico/v3.27.3/manifests/calico.yaml
