@@ -1,0 +1,38 @@
+- name: Create MinIO namespace
+  tags: minio
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    api_version: v1
+    kind: Namespace
+    name: "{{ minio_namespace }}"
+
+- name: Deploy MinIO via Helm
+  tags: minio
+  kubernetes.core.helm:
+    kubeconfig: "{{ kubeconfig_path }}"
+    name: "{{ minio_release_name }}"
+    chart_ref: minio/minio
+    release_namespace: "{{ minio_namespace }}"
+    create_namespace: false
+    values:
+      mode: standalone
+      replicas: 1
+      persistence:
+        enabled: true
+        size: 10Gi
+      resources:
+        requests:
+          memory: 512Mi
+          cpu: 250m
+      accessKey: "{{ minio_access_key }}"
+      secretKey: "{{ minio_secret_key }}"
+      service:
+        type: ClusterIP
+        ports:
+          api: 9000
+          console: 9001
+      consoleService:
+        type: ClusterIP
+      extraArgs:
+        - "--address=:9000"
+        - "--console-address=:9001"

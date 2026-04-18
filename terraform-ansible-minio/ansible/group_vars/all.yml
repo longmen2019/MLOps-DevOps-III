@@ -1,0 +1,13 @@
+kubeconfig_path: "{{ playbook_dir }}/kubeconfig"
+
+minio_namespace: "minio"
+minio_release_name: "minio"
+minio_bucket_name: "velero-backups"
+minio_access_key: "DB5EXKNNkaogIYlqOUQa"
+minio_secret_key: "DsWvOk9r6iWP2z5aG3t7M8NfZBZgg3fLOJM01Izb"
+
+velero_namespace: "velero"
+velero_release_name: "velero"
+velero_chart_version: "5.0.1"
+velero_backup_bucket: "{{ minio_bucket_name }}"
+velero_provider: "aws"

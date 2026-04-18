@@ -1,0 +1,9 @@
+- name: Add MinIO Helm repo
+  kubernetes.core.helm_repository:
+    name: minio
+    repo_url: https://charts.min.io/
+
+- name: Add Velero Helm repo
+  kubernetes.core.helm_repository:
+    name: vmware-tanzu
+    repo_url: https://vmware-tanzu.github.io/helm-charts

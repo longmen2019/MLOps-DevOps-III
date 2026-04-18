@@ -1,0 +1,17 @@
+- hosts: local
+  gather_facts: false
+  tasks:
+    - name: Install Helm
+      tags: helm
+      include_role:
+        name: helm
+
+    - name: Deploy MinIO
+      tags: minio
+      include_role:
+        name: minio
+
+    - name: Deploy Velero
+      tags: velero
+      include_role:
+        name: velero

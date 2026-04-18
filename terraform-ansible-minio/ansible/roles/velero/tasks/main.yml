@@ -1,0 +1,77 @@
+- name: Create Velero namespace
+  tags: velero
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    api_version: v1
+    kind: Namespace
+    name: "{{ velero_namespace }}"
+
+- name: Create Velero credentials secret
+  tags: velero
+  kubernetes.core.k8s:
+    kubeconfig: "{{ kubeconfig_path }}"
+    state: present
+    force: true
+    definition:
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: cloud-credentials
+        namespace: "{{ velero_namespace }}"
+      type: Opaque
+      stringData:
+        cloud: |
+          [default]
+          aws_access_key_id={{ minio_access_key }}
+          aws_secret_access_key={{ minio_secret_key }}
+
+- name: Deploy Velero via Helm
+  tags: velero
+  kubernetes.core.helm:
+    kubeconfig: "{{ kubeconfig_path }}"
+    name: "{{ velero_release_name }}"
+    chart_ref: vmware-tanzu/velero
+    namespace: "{{ velero_namespace }}"     # <-- FIXED
+    create_namespace: false
+    state: present
+    values:
+      configuration:
+        backupStorageLocation:
+          - name: default
+            provider: aws
+            bucket: velero-backups
+            prefix: ""
+            config:
+              region: minio
+              s3Url: "http://minio.minio.svc.cluster.local:9000"
+              s3ForcePathStyle: true
+              insecureSkipTLSVerify: true
+
+        volumeSnapshotLocation:
+          - name: default
+            provider: aws
+            config:
+              region: minio
+
+      credentials:
+        useSecret: true
+        existingSecret: cloud-credentials
+
+      initContainers:
+        - name: velero-plugin-for-aws
+          image: velero/velero-plugin-for-aws:v1.8.0
+          imagePullPolicy: IfNotPresent
+          volumeMounts:
+            - mountPath: /target
+              name: plugins
+
+      deployNodeAgent: false
+
+      serviceAccount:
+        server:
+          create: true
+
+      resources:
+        requests:
+          cpu: 100m
+          memory: 256Mi
