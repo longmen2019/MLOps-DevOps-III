@@ -1,0 +1,17 @@
+configFile: |-
+  provider = "oidc"
+  oidc_issuer_url = "http://localhost:8080/realms/myrealm"
+  client_id = "oauth2-proxy"
+  client_secret = "oigxiTXJpY3fFnHrAh0sT30LPjTEt4DE"
+  cookie_secret = "0123456789abcdef0123456789abcdef"
+  redirect_url = "http://localhost:4180/oauth2/callback"
+  email_domains = ["*"]
+  upstreams = ["file:///dev/null"]
+
+extraArgs:
+  - --insecure-oidc-allow-unverified-email=true
+  - --skip-provider-button=true
+
+service:
+  type: ClusterIP
+  portNumber: 80
