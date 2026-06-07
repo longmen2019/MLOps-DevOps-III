@@ -1,0 +1,104 @@
+# ---
+# - name: Prepare Jumpbox with Kubernetes tools
+#   hosts: jumpbox
+#   become: yes
+
+#   tasks:
+#     - name: Update apt cache
+#       apt:
+#         update_cache: yes
+
+#     - name: Install base packages
+#       apt:
+#         name:
+#           - curl
+#           - git
+#           - apt-transport-https
+#           - ca-certificates
+#           - gnupg
+#           - software-properties-common
+#           - unzip
+#         state: present
+
+#     # -----------------------------
+#     # Install kubectl (NEW REPO)
+#     # -----------------------------
+#     - name: Add Kubernetes apt key (new repo format)
+#       shell: |
+#         curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key \
+#         | gpg --dearmor \
+#         | tee /usr/share/keyrings/kubernetes-apt-keyring.gpg > /dev/null
+#       args:
+#         warn: false
+
+#     - name: Add Kubernetes apt repository (new repo format)
+#       apt_repository:
+#         repo: "deb [signed-by=/usr/share/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /"
+#         state: present
+#         filename: kubernetes
+
+#     - name: Install kubectl
+#       apt:
+#         name: kubectl
+#         state: present
+#         update_cache: yes
+
+#     # -----------------------------
+#     # Install Helm
+#     # -----------------------------
+#     - name: Install Helm
+#       shell: |
+#         curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+#     # -----------------------------
+#     # Install Postman (snap)
+#     # -----------------------------
+#     - name: Install snapd
+#       apt:
+#         name: snapd
+#         state: present
+
+#     - name: Install Postman
+#       snap:
+#         name: postman
+#         classic: yes
+
+#     # -----------------------------
+#     # Install Prometheus + Grafana
+#     # -----------------------------
+#     - name: Add Prometheus Helm repo
+#       shell: |
+#         helm repo add prometheus https://prometheus-community.github.io/helm-charts/
+#         helm repo update
+
+#     - name: Create monitoring namespace
+#       kubernetes.core.k8s:
+#         api_version: v1
+#         kind: Namespace
+#         name: monitoring
+#         state: present
+
+#     - name: Install kube-prometheus-stack
+#       shell: |
+#         helm install prometheus prometheus/kube-prometheus-stack \
+#           --version 45.7.1 \
+#           --namespace monitoring \
+#           --create-namespace \
+#           -f /home/azureuser/monitoring-helm/values.yaml
+---
+- name: Prepare Jumpbox with basic tools
+  hosts: jumpbox
+  become: yes
+
+  tasks:
+    - name: Update apt cache
+      apt:
+        update_cache: yes
+
+    - name: Install base packages
+      apt:
+        name:
+          - curl
+          - git
+          - unzip
+        state: present

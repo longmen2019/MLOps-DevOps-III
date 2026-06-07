@@ -1,0 +1,25 @@
+#cloud-config
+package_update: true
+package_upgrade: true
+
+packages:
+  - curl
+  - apt-transport-https
+  - ca-certificates
+  - gnupg
+  - git
+  - unzip
+
+runcmd:
+  # Install kubectl (new Kubernetes repo + correct GPG key)
+  - curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | gpg --dearmor | tee /usr/share/keyrings/kubernetes-apt-keyring.gpg > /dev/null
+  - echo "deb [signed-by=/usr/share/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /" | tee /etc/apt/sources.list.d/kubernetes.list
+  - apt update
+  - apt install -y kubectl
+
+  # Install Helm
+  - curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+  # Prepare kube directory
+  - mkdir -p /home/azureuser/.kube
+  - chown azureuser:azureuser /home/azureuser/.kube

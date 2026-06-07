@@ -1,0 +1,35 @@
+keycloakx:
+  replicas: 1
+
+  command:
+    - "/opt/keycloak/bin/kc.sh"
+    - "start"
+    - "--optimized"
+
+  keycloak:
+    username: admin
+    password: admin
+
+    extraEnv:
+      - name: KC_PRODUCTION
+        value: "true"
+      - name: KC_HOSTNAME_STRICT
+        value: "false"
+      - name: KC_HTTP_ENABLED
+        value: "true"
+      - name: VERTX_WORKER_POOL_SIZE
+        value: "20"
+      - name: VERTX_EVENT_LOOP_POOL_SIZE
+        value: "8"
+
+  service:
+    type: NodePort
+    nodePort: 30080
+
+  postgresql:
+  enabled: true
+  auth:
+    username: bn_keycloak
+    password: bn_keycloak
+    database: bitnami_keycloak
+
