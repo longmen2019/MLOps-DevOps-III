@@ -1,0 +1,26 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: utility-api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: utility-api
+  template:
+    metadata:
+      labels:
+        app: utility-api
+    spec:
+      containers:
+      - name: utility-api
+        image: k8s.gcr.io/hpa-example
+        ports:
+        - containerPort: 80
+        resources:
+          requests:
+            cpu: 100m
+            memory: 50Mi
+          limits:
+            cpu: 500m
+            memory: 200Mi

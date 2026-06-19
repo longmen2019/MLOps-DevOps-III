@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: traffic-generator
+spec:
+  containers:
+  - name: traffic-generator
+    image: alpine:3.19
+    command: ["/bin/sh"]
+    args:
+      - "-c"
+      - |
+        apk add --no-cache curl wget busybox-extras;
+        echo "Traffic generator ready";
+        sleep infinity
+    resources:
+      requests:
+        cpu: 50m
+        memory: 32Mi
+      limits:
+        cpu: 200m
+        memory: 128Mi

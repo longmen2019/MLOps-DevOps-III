@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mongo-config
+data:
+  username: admin1
+  mongod.conf: |
+    storage:
+      dbPath: /data/db
+    replication:
+      replSetName: "rs0"

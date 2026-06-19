@@ -1,0 +1,14 @@
+############################################
+# GENERAL NODE POOL
+############################################
+resource "azurerm_kubernetes_cluster_node_pool" "general" {
+  name                  = "general"
+  kubernetes_cluster_id = azurerm_kubernetes_cluster.aks.id
+  vm_size               = "Standard_B1ms"
+  node_count            = 1
+  mode                  = "User"
+
+  node_labels = {
+    "nodepool-type" = "general"
+  }
+}
