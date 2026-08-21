@@ -1,0 +1,27 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+  namespace: monitoring
+data:
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: 'app-monitoring-logs'
+        orgId: 1
+        folder: 'Monitoring'
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards
+
+  app-monitoring-logs.json: |
+    {
+      "title": "Application Monitoring & Logging Dashboard",
+      "uid": "app-monitoring-logs",
+      "tags": ["monitoring", "logs", "metrics", "prometheus", "loki"],
+      "panels": [
+        ... paste your full JSON here ...
+      ]
+    }

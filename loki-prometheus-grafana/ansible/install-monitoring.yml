@@ -1,0 +1,163 @@
+---
+- hosts: monitoring
+  become: yes
+
+  tasks:
+
+    #################################################################
+    # SYSTEM PREP
+    #################################################################
+
+    - name: Update apt
+      apt:
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Install required packages
+      apt:
+        name:
+          - docker.io
+          - curl
+          - rsync
+        state: present
+
+    - name: Enable Docker
+      systemd:
+        name: docker
+        enabled: yes
+        state: started
+
+    #################################################################
+    # KUBECTL
+    #################################################################
+
+    - name: Check if kubectl is installed
+      shell: which kubectl
+      register: kubectl_check
+      ignore_errors: true
+      changed_when: false
+
+    - name: Install kubectl
+      shell: |
+        curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+        curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl.sha256"
+        echo "$(cat kubectl.sha256)  kubectl" | sha256sum --check
+        install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+      args:
+        executable: /bin/bash
+      when: kubectl_check.rc != 0
+
+    #################################################################
+    # HELM
+    #################################################################
+
+    - name: Check if Helm is installed
+      shell: which helm
+      register: helm_check
+      ignore_errors: true
+      changed_when: false
+
+    - name: Install Helm
+      shell: |
+        curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-4
+        chmod 700 get_helm.sh
+        ./get_helm.sh
+      args:
+        executable: /bin/bash
+      when: helm_check.rc != 0
+
+    #################################################################
+    # K3D CLUSTER
+    #################################################################
+
+    - name: Add ubuntu user to docker group
+      user:
+        name: ubuntu
+        groups: docker
+        append: yes
+
+    - name: Check if k3d is installed
+      shell: which k3d
+      register: k3d_check
+      ignore_errors: true
+      changed_when: false
+
+    - name: Install k3d
+      shell: |
+        curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+      args:
+        executable: /bin/bash
+      when: k3d_check.rc != 0
+
+    - name: Delete existing k3d monitoring cluster
+      shell: |
+        k3d cluster delete monitoring || true
+      args:
+        executable: /bin/bash
+      changed_when: true
+
+    - name: Create k3d cluster
+      shell: |
+        k3d cluster create monitoring --servers 1 --agents 1
+      args:
+        executable: /bin/bash
+
+    - name: Create monitoring namespace
+      shell: |
+        kubectl create namespace monitoring || true
+      args:
+        executable: /bin/bash
+
+    #################################################################
+    # COPY LOCAL K8S MANIFESTS TO REMOTE
+    #################################################################
+
+    - name: Create k8s directory on remote
+      file:
+        path: /home/ubuntu/k8s
+        state: directory
+        owner: ubuntu
+        group: ubuntu
+        mode: '0755'
+
+    - name: Copy k8s manifests to remote
+      become: no
+      synchronize:
+        src: "{{ playbook_dir }}/../k8s/"
+        dest: /home/ubuntu/k8s/
+        recursive: yes
+        delete: no
+
+    - name: Verify k8s manifests on remote
+      shell: ls -R /home/ubuntu/k8s
+      register: k8s_tree
+      args:
+        executable: /bin/bash
+      changed_when: false
+
+    - debug:
+        var: k8s_tree.stdout
+
+    #################################################################
+    # APPLY MANIFESTS
+    #################################################################
+
+    - name: Apply Loki manifests
+      shell: kubectl apply -f /home/ubuntu/k8s/loki/
+      args:
+        executable: /bin/bash
+
+    - name: Apply Promtail manifests
+      shell: kubectl apply -f /home/ubuntu/k8s/promtail/
+      args:
+        executable: /bin/bash
+
+    - name: Apply Prometheus manifests
+      shell: kubectl apply -f /home/ubuntu/k8s/prometheus/
+      args:
+        executable: /bin/bash
+
+    - name: Apply Grafana manifests
+      shell: kubectl apply -f /home/ubuntu/k8s/grafana/
+      args:
+        executable: /bin/bash
