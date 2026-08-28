@@ -1,0 +1,274 @@
+Task
+
+
+
+
+
+
+
+
+
+
+
+
+Solution
+SSH into the cluster1-controlplane host
+ssh cluster1-controlplane
+
+Try to apply the template
+kubectl apply -f red-probe-cka12-trb.yaml 
+
+You will see error:
+
+error: error validating "red-probe-cka12-trb.yaml": error validating data: [ValidationError(Pod.spec.containers[0].livenessProbe.httpGet): unknown field "command" in io.k8s.api.core.v1.HTTPGetAction, ValidationError(Pod.spec.containers[0].livenessProbe.httpGet): missing required field "port" in io.k8s.api.core.v1.HTTPGetAction]; if you choose to ignore these errors, turn validation off with --validate=false
+
+From the error you can see that the error is for liveness probe, so let's open the template to find out:
+
+vi red-probe-cka12-trb.yaml
+
+Under livenessProbe: you will see the type is httpGet however the rest of the options are command based so this probe should be of exec type.
+
+Change httpGet to exec
+Try to apply the template now
+kubectl apply -f red-probe-cka12-trb.yaml 
+
+Cool it worked, now let's watch the POD status, after few seconds you will notice that POD is restarting. So let's check the logs/events
+
+kubectl get event --field-selector involvedObject.name=red-probe-cka12-trb
+
+You will see an error like:
+
+21s         Warning   Unhealthy   pod/red-probe-cka12-trb   Liveness probe failed: cat: can't open '/healthcheck': No such file or directory
+
+So seems like Liveness probe is failing, lets look into it:
+
+vi red-probe-cka12-trb.yaml
+
+Notice the command - sleep 3 ; touch /healthcheck; sleep 30;sleep 30000 it starts with a delay of 3 seconds, but the liveness probe initialDelaySeconds is set to 1 and failureThreshold is also 1. Which means the POD will fail just after first attempt of liveness check which will happen just after 1 second of pod start. So to make it stable we must increase the initialDelaySeconds to at least 5
+
+vi red-probe-cka12-trb.yaml
+
+Change initialDelaySeconds from 1 to 5 and save apply the changes.
+Delete old pod:
+
+kubectl delete pod red-probe-cka12-trb
+
+Apply changes:
+
+kubectl apply -f red-probe-cka12-trb.yaml
+
+Details
+Is the template fixed and applied?
+
+Is the POD stable?
+
+Is the template not manipulated?
+
+Q. 2
+
+Task
+
+
+
+
+
+
+Q. 3
+
+Task
+
+
+
+
+
+
+Solution
+Step 1: SSH into the Control Plane Node
+ssh cluster4-controlplane
+
+Step 2: Inspect the kube-apiserver Pod
+Check the status of the kube-apiserver static pod:
+
+crictl ps -a | grep kube-apiserver
+
+Get the logs:
+
+crictl logs <container_id>
+
+If the container is continuously restarting or the API server is unreachable via kubectl, the logs will help identify the issue.
+
+Step 3: Notice Connection Errors in Logs
+You will observe repeated errors similar to:
+
+grpc: addrConn.createTransport failed to connect to {Addr: "127.0.0.1:2379", ServerName: "127.0.0.1:2379", }. Err: connection error: desc = "error reading server preface: read tcp 127.0.0.1:57110->127.0.0.1:2379: read: connection reset by peer"
+Err: connection error: desc = "error reading server preface: EOF"
+
+This indicates the API server is attempting to connect to etcd but failing to establish a valid connection.
+
+Step 4: Inspect the Static Pod Manifest
+Open the static pod manifest for the API server:
+
+sudo vi /etc/kubernetes/manifests/kube-apiserver.yaml
+
+Look for the --etcd-server flag in the container command section. If you see:
+
+- --etcd-server=http://127.0.0.1:2379
+
+That is incorrect. The flag name is missing an "s", and the protocol should be HTTPS (not HTTP).
+
+Fix it:
+- --etcd-servers=https://127.0.0.1:2379
+
+Save and exit the file. The API server will auto-restart because static pods are monitored by the kubelet.
+
+Step 5: Validate CA Certificate Path
+If the logs now show a TLS error like:
+
+Err: connection error: desc = "transport: authentication handshake failed: tls: failed to verify certificate: x509: certificate signed by unknown authority"
+
+This means the API server is reaching etcd, but the certificate authority (CA) being used is incorrect.
+
+Open the manifest again:
+
+sudo vi /etc/kubernetes/manifests/kube-apiserver.yaml
+
+Look for this line:
+
+- --etcd-cafile=/etc/kubernetes/pki/ca.crt
+
+This is wrong. The API server should use the etcd-specific CA certificate.
+
+Fix it:
+- --etcd-cafile=/etc/kubernetes/pki/etcd/ca.crt
+
+Save and exit.
+
+Step 6: Verify Everything is Working
+Check node and pod status:
+
+kubectl get nodes
+kubectl get pods -A
+
+Monitor the kube-apiserver container to ensure it is not restarting:
+
+crictl ps | grep kube-apiserver
+
+You should no longer see error logs, and the control plane should be fully operational.
+
+Details
+Is the Issue fixed?
+
+Q. 4
+
+Task
+
+
+
+
+
+
+
+
+
+Solution
+SSH into the cluster1-controlplane host
+ssh cluster1-controlplane
+
+First list the available pods:
+
+kubectl get pod
+
+Look into the nginx-dp-xxxx POD logs
+
+kubectl logs -f <pod-name>
+
+You may not see any logs so look into the kubernetes events for <pod-name> POD
+
+Look into the POD events
+
+kubectl get event --field-selector involvedObject.name=<pod-name>
+
+You will see an error something like:
+
+70s         Warning   FailedMount   pod/nginx-dp-cka04-trb-767b767dc-6c5wk   Unable to attach or mount volumes: unmounted volumes=[nginx-config-volume-cka04-trb], unattached volumes=[index-volume-cka04-trb kube-api-access-4fbrb nginx-config-volume-cka04-trb]: timed out waiting for the condition
+
+From the error we can see that its not able to mount nginx-config-volume-cka04-trb volume
+Check the nginx-dp-cka04-trb deployment
+
+kubectl get deploy nginx-dp-cka04-trb -o=yaml
+
+Under volumes: look for the configMap: name which is nginx-configuration-cka04-trb. Now lets look into this configmap.
+
+kubectl get configmap nginx-configuration-cka04-trb
+
+The above command will fail as there is no configmap with this name, so now list the all configmaps.
+
+kubectl get configmap
+
+You will see an configmap named nginx-config-cka04-trb which seems to be the correct one.
+Edit the nginx-dp-cka04-trb deployment now
+
+kubectl edit deploy nginx-dp-cka04-trb
+
+Under configMap: change nginx-configuration-cka04-trb to nginx-config-cka04-trb. Once done, wait for the POD to come up.
+
+Try to access the website now:
+
+curl http://cluster1-controlplane:30002
+
+Details
+Is the website is working?
+
+Q. 5
+Partial credit
+Task
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+Solution
+SSH into the cluster1-controlplane host
+ssh cluster1-controlplane
+
+Create a YAML file as below:
+apiVersion: v1
+kind: Pod
+metadata:
+  name: grape-pod-cka06-str
+spec:
+  restartPolicy: Always
+  initContainers:
+    - name: busybox-sidecar
+      image: busybox
+      restartPolicy: Always
+      command: ["sleep", "7200"]
+      volumeMounts:
+        - name: grape-vol-cka06-str
+          mountPath: /usr/src
+
+  containers:
+    - name: nginx
+      image: nginx
+      volumeMounts:
+        - name: grape-vol-cka06-str
+          mountPath: /var/log/nginx
+
+  volumes:
+    - name: grape-vol-cka06-str
+      emptyDir: {}
+
+Apply the template:
+kubectl apply -f <template-file-name>.yaml
